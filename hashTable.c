@@ -44,7 +44,7 @@ keyCmp(
 	u32 key2Hash);
 
 static inline u64 
-computeHash(u8 *key, u8 keyLen);
+computeHash(u8 *key, u8 keyLen, u64 seed);
 
 /*******************************************************************************
  * Section Init
@@ -66,6 +66,7 @@ hashTable_init(HashTable **ht_p)
 		return hashTable_errorMallocFailed;
 	}
 	HASHTABLE_MEMSET(ht->table, 0, BASE_SIZE);
+	ht->seed =  0xcbf29ce484222325;
 	ht->count = 0;
 	ht->size  = BASE_SIZE/ENTRY_SIZE;
 	*ht_p = ht;
@@ -115,7 +116,7 @@ HashTable_insert_internal(
 	returnCode = checkForSpace(ht);
 	if(returnCode){return returnCode;}
 	
-	hash = HT_HASH(key, keyLen);
+	hash = HT_HASH(key, keyLen, ht->seed);
 	// search for existing key
 	hashVal = hash & MASK_32_BITS;
 	hash = hash & getMask(ht->size);
@@ -240,7 +241,7 @@ hashTable_find_internal(
 	u32 hashVal;
 	hashTableNode *cur_node;
 	
-	hash = HT_HASH(key, keyLen);
+	hash = HT_HASH(key, keyLen, ht->seed);
 	// search for existing key
 	hashVal = hash & MASK_32_BITS;
 	hash = hash & getMask(ht->size);
@@ -297,7 +298,7 @@ hashTable_delete_internal(
 	u32 hashVal;
 	hashTableNode *cur_node, *prev_node=0;
 	
-	hash = HT_HASH(key, keyLen);
+	hash = HT_HASH(key, keyLen, ht->seed);
 	// search for existing key
 	hashVal = hash & MASK_32_BITS;
 	hash = hash & getMask(ht->size);
@@ -384,21 +385,26 @@ hashTable_deleteIntKey(
 /*******************************************************************************
  * Section Helper Functions
 *******************************************************************************/
-static u64
-hashTableSeed=0xcbf29ce484222325;
+
+HASHTABLE_STATIC_BUILD
+u64
+hashTable_getSeed(HashTable *ht)
+{
+	return ht->seed;
+}
 
 HASHTABLE_STATIC_BUILD
 void
-hashTable_seed(u64 seed)
+hashTable_setSeed(HashTable *ht, u64 seed)
 {
-	hashTableSeed = seed;
+	ht->seed = seed;
 }
 
 // slightly modified fnv-1 algorithm, public domain
 static inline u64 
-computeHash(u8 *key, u8 keyLen)
+computeHash(u8 *key, u8 keyLen, u64 seed)
 {
-	u64 hash = hashTableSeed;
+	u64 hash = seed;
 
 	for (u32 x=0; x<keyLen; x++)
 	{

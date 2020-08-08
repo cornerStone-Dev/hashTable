@@ -31,9 +31,9 @@ typedef uint64_t HtValue;
 #endif
 
 // hash needs to be of type
-// uint64_t yourHashFunction(uint8_t *key, uint8_t keyLen)
+// uint64_t yourHashFunction(uint8_t *key, uint8_t keyLen, uint64_t seed)
 #ifndef HASHTABLE_CUSTOM_HASH
-#define HT_HASH(x,y)  (computeHash((x),(y)))
+#define HT_HASH(x,y,z)  (computeHash((x),(y),(z)))
 #endif
 
 #ifdef HASHTABLE_STATIC_BUILD_IN
@@ -60,6 +60,7 @@ typedef struct HtNode_s {
 
 typedef struct {
 	hashTableNode **table;
+	uint64_t      seed;
 	uint32_t      count;
 	uint32_t      size;
 } HashTable;
@@ -147,8 +148,12 @@ hashTable_debugString(int32_t mainAPIReturnValue);
 #endif
 
 HASHTABLE_STATIC_BUILD
+uint64_t
+hashTable_getSeed(HashTable *ht);
+
+HASHTABLE_STATIC_BUILD
 void
-hashTable_seed(uint64_t seed);
+hashTable_setSeed(HashTable *ht, uint64_t seed);
 
 HASHTABLE_STATIC_BUILD
 uint32_t
