@@ -36,7 +36,7 @@ typedef uint64_t HtValue;
 #define HT_HASH(x,y)  (computeHash((x),(y)))
 #endif
 
-#ifdef HASHTABLE_STATIC_BUILD
+#ifdef HASHTABLE_STATIC_BUILD_IN
 #define HASHTABLE_STATIC_BUILD static
 #else
 #define HASHTABLE_STATIC_BUILD
