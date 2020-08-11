@@ -13,11 +13,7 @@
 #include <stdlib.h>
 #define HASHTABLE_FREE   free
 #define HASHTABLE_MALLOC malloc
-#endif
-
-#ifndef HASHTABLE_CUSTOM_MEMSET
-#include <string.h>
-#define HASHTABLE_MEMSET memset
+#define HASHTABLE_CALLOC calloc
 #endif
 
 #ifndef HASHTABLE_CUSTOM_TYPE

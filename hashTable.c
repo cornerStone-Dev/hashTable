@@ -61,11 +61,10 @@ hashTable_init(HashTable **ht_p)
 	if(ht==0){
 		return hashTable_errorMallocFailed;
 	}
-	ht->table = HASHTABLE_MALLOC(BASE_SIZE);
+	ht->table = HASHTABLE_CALLOC(1, BASE_SIZE);
 	if(ht->table==0){
 		return hashTable_errorMallocFailed;
 	}
-	HASHTABLE_MEMSET(ht->table, 0, BASE_SIZE);
 	ht->seed =  0xcbf29ce484222325;
 	ht->count = 0;
 	ht->size  = BASE_SIZE/ENTRY_SIZE;
@@ -442,9 +441,8 @@ checkForSpace(HashTable *ht)
 	// save off old table
 	old_table = ht->table;
 	// make new table
-	ht->table = HASHTABLE_MALLOC(htSize*ENTRY_SIZE);
+	ht->table = HASHTABLE_CALLOC(1, htSize*ENTRY_SIZE);
 	if(ht->table){
-		HASHTABLE_MEMSET(ht->table, 0, htSize*ENTRY_SIZE);
 		// re-hash(if needed) everything and insert
 		hashTableNode *cur_node, *next_node;
 		size = (htSize/2);
