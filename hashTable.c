@@ -120,32 +120,9 @@ HashTable_insert_internal(
 	hashVal = hash & MASK_32_BITS;
 	hash = hash & getMask(ht->size);
 	cur_node = ht->table[hash];
-	if(cur_node){
-		// something exists,  might be key
-		while (1){
-			if(keyCmp(
-				key,
-				keyLen,
-				hashVal,
-				cur_node->key,
-				cur_node->keyLen,
-				cur_node->hash)==0){
-				// key does exist, update value
-				cur_node->value = value;
-				return hashTable_updatedValOfExistingKey;
-			}
-			if(cur_node->next==0){
-				// key does not exist, but shares hash value
-				new_node = makeNode(ht, key, keyLen, value, hashVal);
-				if(new_node==0){
-					return hashTable_errorMallocFailed;
-				}
-				cur_node->next = new_node;
-				return hashTable_OK;
-			}
-			cur_node=cur_node->next;
-		}
-	} else {
+	
+	if (cur_node == 0)
+	{
 		// nothing exists, make node and insert
 		new_node = makeNode(ht, key, keyLen, value, hashVal);
 		if(new_node==0){
@@ -153,6 +130,31 @@ HashTable_insert_internal(
 		}
 		ht->table[hash] = new_node;
 		return hashTable_OK;
+	}
+
+	// something exists,  might be key
+	while (1){
+		if(keyCmp(
+			key,
+			keyLen,
+			hashVal,
+			cur_node->key,
+			cur_node->keyLen,
+			cur_node->hash)==0){
+			// key does exist, update value
+			cur_node->value = value;
+			return hashTable_updatedValOfExistingKey;
+		}
+		if(cur_node->next==0){
+			// key does not exist, but shares hash value
+			new_node = makeNode(ht, key, keyLen, value, hashVal);
+			if(new_node==0){
+				return hashTable_errorMallocFailed;
+			}
+			cur_node->next = new_node;
+			return hashTable_OK;
+		}
+		cur_node=cur_node->next;
 	}
 }
 
@@ -245,28 +247,30 @@ hashTable_find_internal(
 	hashVal = hash & MASK_32_BITS;
 	hash = hash & getMask(ht->size);
 	cur_node = ht->table[hash];
-	if(cur_node){
-		// something exists,  might be key
-		while (1){
-			if(keyCmp(
-				key,
-				keyLen,
-				hashVal,
-				cur_node->key,
-				cur_node->keyLen,
-				cur_node->hash)==0){
-				// key does exist, return key
-				return cur_node;
-			}
-			if(cur_node->next==0){
-				// key does not exist, but shares hash value
-				return 0;
-			}
-			cur_node=cur_node->next;
-		}
-	} else {
+	
+	if (cur_node == 0)
+	{
 		// nothing exists
 		return 0;
+	}
+	
+	// something exists,  might be key
+	while (1){
+		if(keyCmp(
+			key,
+			keyLen,
+			hashVal,
+			cur_node->key,
+			cur_node->keyLen,
+			cur_node->hash)==0){
+			// key does exist, return key
+			return cur_node;
+		}
+		if(cur_node->next==0){
+			// key does not exist, but shares hash value
+			return 0;
+		}
+		cur_node=cur_node->next;
 	}
 }
 
@@ -302,50 +306,47 @@ hashTable_delete_internal(
 	hashVal = hash & MASK_32_BITS;
 	hash = hash & getMask(ht->size);
 	cur_node = ht->table[hash];
-	if(cur_node){
-		// something exists,  might be key
-		while (1){
-			if(keyCmp(
-				key,
-				keyLen,
-				hashVal,
-				cur_node->key,
-				cur_node->keyLen,
-				cur_node->hash)==0){
-				// key does exist, delete key
-				if(value){
-					*value = cur_node->value;
-				}
-				// relink list if applicable
-				if((cur_node->next==0)&&(prev_node==0)){
-					// single entry
-					ht->table[hash]=0;
-				} else
-				if((cur_node->next!=0)&&(prev_node==0)){
-					// start of chain
-					ht->table[hash]=cur_node->next;
-				} else
-				if((cur_node->next!=0)&&(prev_node!=0)){
-					// middle of chain
-					prev_node->next=cur_node->next;
-				} else {
-					// end entry
-					prev_node->next=0;
-				}
-				free(cur_node);
-				ht->count--;
-				return hashTable_OK;
-			}
-			if(cur_node->next==0){
-				// key does not exist, but shares hash value
-				return hashTable_nothingFound;
-			}
-			prev_node = cur_node;
-			cur_node=cur_node->next;
-		}
-	} else {
+	
+	if (cur_node == 0)
+	{
 		// nothing exists
 		return hashTable_nothingFound;
+	}
+	
+	// something exists,  might be key
+	while (1){
+		if(keyCmp(
+			key,
+			keyLen,
+			hashVal,
+			cur_node->key,
+			cur_node->keyLen,
+			cur_node->hash)==0){
+			// key does exist, delete key
+			if(value){
+				*value = cur_node->value;
+			}
+			// relink list if applicable
+			if(prev_node==0){
+				// single entry or start of chain
+				// [ht]->[cur_node]->NULL or [ht]->[cur_node]->[NODE]
+				ht->table[hash]=cur_node->next;
+			} else {
+				// middle of chain or end entry
+				// [prev]->[cur_node]->[NODE] or [prev]->[cur_node]->NULL
+				prev_node->next=cur_node->next;
+			}
+
+			free(cur_node);
+			ht->count--;
+			return hashTable_OK;
+		}
+		if(cur_node->next==0){
+			// key does not exist, but shares hash value
+			return hashTable_nothingFound;
+		}
+		prev_node = cur_node;
+		cur_node=cur_node->next;
 	}
 }
 
@@ -442,30 +443,32 @@ checkForSpace(HashTable *ht)
 	old_table = ht->table;
 	// make new table
 	ht->table = HASHTABLE_CALLOC(1, htSize*ENTRY_SIZE);
-	if(ht->table){
-		// re-hash(if needed) everything and insert
-		hashTableNode *cur_node, *next_node;
-		size = (htSize/2);
-		mask = getMask(htSize); 
-		for(u32 x = 0; x < size; x++)
-		{
-			cur_node = old_table[x];
-			while(cur_node){
-				// there is atleast one thing here
-				next_node=cur_node->next;
-				cur_node->next = 0;
-				hashTable_insert_node(ht, cur_node, mask);
-				cur_node=next_node;
-			}
-		}
-		// free old tree
-		free(old_table);
-		return hashTable_OK;
-	} else {
+	
+	if (ht->table==0)
+	{
 		// set table back to old one and report error
 		ht->table = old_table;
 		return hashTable_errorMallocFailed;
 	}
+	
+	// re-hash(if needed) everything and insert
+	hashTableNode *cur_node, *next_node;
+	size = (htSize/2);
+	mask = getMask(htSize); 
+	for(u32 x = 0; x < size; x++)
+	{
+		cur_node = old_table[x];
+		while(cur_node){
+			// there is atleast one thing here
+			next_node=cur_node->next;
+			cur_node->next = 0;
+			hashTable_insert_node(ht, cur_node, mask);
+			cur_node=next_node;
+		}
+	}
+	// free old tree
+	free(old_table);
+	return hashTable_OK;
 }
 
 
