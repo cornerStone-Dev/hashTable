@@ -1,8 +1,8 @@
 
-all: bin hashTable.o bin/hashTableTest
+all: bin hashTable.o
 
 hashTable.o: hashTable.c hashTable.h
-	gcc -Os -march=native -fno-builtin-memset hashTable.c -c -o hashTable.o -Wall -Wextra
+	gcc -Os -march=native hashTable.c -c -o hashTable.o -Wall -Wextra
 	size hashTable.o
 
 bin/hashTableTest: hashTableTest.c hashTable.o
@@ -11,7 +11,7 @@ bin/hashTableTest: hashTableTest.c hashTable.o
 bin:
 	mkdir bin
 
-test:
+test: bin/hashTableTest
 	time ./bin/hashTableTest
 
 clean:
