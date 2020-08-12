@@ -38,7 +38,7 @@ typedef uint64_t HtValue;
 #define HASHTABLE_STATIC_BUILD
 #endif
 
-#define BASE_SIZE (1024)
+#define BASE_SIZE (64)
 
 /*******************************************************************************
  * Section Types
