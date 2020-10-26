@@ -192,8 +192,8 @@ hashTable_stringTos64(uint8_t *string);
 
 #define HASHTABLE_TRAVERSAL(ht, function, parameter) \
 do{ \
+	__label__ EXIT; \
 	if(ht){ \
-		__label__ EXIT; \
 		hashTableNode **table = ht->table; \
 		hashTableNode *cur_node; \
 		u32 size; \
