@@ -49,9 +49,9 @@ typedef struct HtNode_s hashTableNode;
 typedef struct HtNode_s {
 	hashTableNode *next;
 	HtValue       value;
-	uint32_t      hash;
+	uint64_t      hash;
 	uint8_t       keyLen;
-	uint8_t       key[3];
+	uint8_t       key[7];
 } hashTableNode;
 
 typedef struct {
@@ -67,13 +67,14 @@ enum {
 	hashTable_errorNullParam1         = -1,
 	hashTable_errorNullParam2         = -2,
 	hashTable_errorNullParam3         = -3,
-	hashTable_errorTableIsEmpty       = -4,
-	hashTable_errorMallocFailed       = -5,
+	hashTable_errorNullParam4         = -4,
+	hashTable_errorTableIsEmpty       = -5,
+	hashTable_errorMallocFailed       = -6,
 	// worked as expected
 	hashTable_OK                      =  0,
 	// not an error, but did not work as expected
 	hashTable_nothingFound            =  1,
-	hashTable_updatedValOfExistingKey =  2,
+	hashTable_updatedValOfExistingKey =  2
 };
 
 /*******************************************************************************

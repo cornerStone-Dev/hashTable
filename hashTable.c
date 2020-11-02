@@ -10,7 +10,6 @@ typedef uint64_t u64;
 typedef int64_t  s64;
 
 #define ENTRY_SIZE (sizeof(hashTableNode*))
-#define MASK_32_BITS 0xFFFFFFFF
 
 /*******************************************************************************
  * Section Local Prototypes
@@ -18,9 +17,6 @@ typedef int64_t  s64;
 
 static inline s32
 stringCompare(u8 *str1, u8 *str2) __attribute__((always_inline));
-
-static hashTableNode * 
-makeNode(HashTable *ht, u8 *key, u32 keyLen, u64 val, u32 hashVal);
 
 static inline u32
 getNodeLen(u32 keyLen);
@@ -32,16 +28,16 @@ static s32
 checkForSpace(HashTable *ht);
 
 static inline hashTableNode * 
-makeNode(HashTable *ht, u8 *key, u32 keyLen, HtValue value, u32 hashVal);
+makeNode(HashTable *ht, u8 *key, u32 keyLen, HtValue value, u64 hashVal);
 
-static inline s32 
+static inline s64 
 keyCmp(
 	u8 *key1,
 	u32 key1Len,
-	u32 key1Hash,
+	u64 key1Hash,
 	u8 *key2,
 	u32 key2Len,
-	u32 key2Hash);
+	u64 key2Hash);
 
 static inline u64 
 computeHash(u8 *key, u8 keyLen, u64 seed);
@@ -97,6 +93,9 @@ hashTable_insert(
 	if(key==0){
 		return hashTable_errorNullParam2;
 	}
+	if(keyLen==0){
+		return hashTable_errorNullParam3;
+	}
 	return HashTable_insert_internal(ht, key, keyLen, value);
 }
 
@@ -104,59 +103,52 @@ static s32
 HashTable_insert_internal(
 	HashTable *ht,
 	u8        *key,
-	u8        keyLen,
-	HtValue   value)
+	u8         keyLen,
+	HtValue    value)
 {
 	u64 hash;
-	u32 hashVal;
+	u64 hashVal;
 	s32 returnCode;
-	hashTableNode *new_node, *cur_node;
+	hashTableNode *newNode, *curNode, **memAddr;
 	
 	returnCode = checkForSpace(ht);
 	if(returnCode){return returnCode;}
 	
 	hash = HT_HASH(key, keyLen, ht->seed);
 	// search for existing key
-	hashVal = hash & MASK_32_BITS;
+	hashVal = hash;
 	hash = hash & getMask(ht->size);
-	cur_node = ht->table[hash];
-	
-	if (cur_node == 0)
-	{
-		// nothing exists, make node and insert
-		new_node = makeNode(ht, key, keyLen, value, hashVal);
-		if(new_node==0){
-			return hashTable_errorMallocFailed;
-		}
-		ht->table[hash] = new_node;
-		return hashTable_OK;
-	}
+	curNode = ht->table[hash];
+	memAddr = &ht->table[hash];
 
-	// something exists,  might be key
+	// begin search for slot
 	while (1){
+		if (curNode == 0)
+		{
+			// nothing exists, make node and insert
+			newNode = makeNode(ht, key, keyLen, value, hashVal);
+			if(newNode==0){
+				return hashTable_errorMallocFailed;
+			}
+			*memAddr = newNode;
+			return hashTable_OK;
+		}
 		if(keyCmp(
 			key,
 			keyLen,
 			hashVal,
-			cur_node->key,
-			cur_node->keyLen,
-			cur_node->hash)==0){
+			curNode->key,
+			curNode->keyLen,
+			curNode->hash)==0){
 			// key does exist, update value
-			cur_node->value = value;
+			curNode->value = value;
 			return hashTable_updatedValOfExistingKey;
 		}
-		if(cur_node->next==0){
-			// key does not exist, but shares hash value
-			new_node = makeNode(ht, key, keyLen, value, hashVal);
-			if(new_node==0){
-				return hashTable_errorMallocFailed;
-			}
-			cur_node->next = new_node;
-			return hashTable_OK;
-		}
-		cur_node=cur_node->next;
+		memAddr = &curNode->next;
+		curNode =  curNode->next;
 	}
 }
+
 
 HASHTABLE_STATIC_BUILD
 s32
@@ -216,8 +208,11 @@ hashTable_find(
 	if(key==0){
 		return hashTable_errorNullParam2;
 	}
-	if(result==0){
+	if(keyLen==0){
 		return hashTable_errorNullParam3;
+	}
+	if(result==0){
+		return hashTable_errorNullParam4;
 	}
 	if(ht->count==0){
 		return hashTable_errorTableIsEmpty;
@@ -239,38 +234,33 @@ hashTable_find_internal(
 	u8        keyLen)
 {
 	u64 hash;
-	u32 hashVal;
-	hashTableNode *cur_node;
+	u64 hashVal;
+	hashTableNode *curNode;
 	
 	hash = HT_HASH(key, keyLen, ht->seed);
 	// search for existing key
-	hashVal = hash & MASK_32_BITS;
+	hashVal = hash;
 	hash = hash & getMask(ht->size);
-	cur_node = ht->table[hash];
-	
-	if (cur_node == 0)
-	{
-		// nothing exists
-		return 0;
-	}
+	curNode = ht->table[hash];
 	
 	// something exists,  might be key
-	while (1){
+	while (1) {
+		if (curNode == 0)
+		{
+			// nothing exists
+			return 0;
+		}
 		if(keyCmp(
 			key,
 			keyLen,
 			hashVal,
-			cur_node->key,
-			cur_node->keyLen,
-			cur_node->hash)==0){
+			curNode->key,
+			curNode->keyLen,
+			curNode->hash)==0){
 			// key does exist, return key
-			return cur_node;
+			return curNode;
 		}
-		if(cur_node->next==0){
-			// key does not exist, but shares hash value
-			return 0;
-		}
-		cur_node=cur_node->next;
+		curNode=curNode->next;
 	}
 }
 
@@ -298,55 +288,44 @@ hashTable_delete_internal(
 	HtValue   *value)
 {
 	u64 hash;
-	u32 hashVal;
-	hashTableNode *cur_node, *prev_node=0;
+	u64 hashVal;
+	hashTableNode **curSlotAddr, *node;
 	
 	hash = HT_HASH(key, keyLen, ht->seed);
 	// search for existing key
-	hashVal = hash & MASK_32_BITS;
+	hashVal = hash;
 	hash = hash & getMask(ht->size);
-	cur_node = ht->table[hash];
-	
-	if (cur_node == 0)
-	{
-		// nothing exists
-		return hashTable_nothingFound;
-	}
+	curSlotAddr = &ht->table[hash];
 	
 	// something exists,  might be key
 	while (1){
+		node = *curSlotAddr;
+		if (node == 0)
+		{
+			// nothing exists
+			return hashTable_nothingFound;
+		}
+		
 		if(keyCmp(
 			key,
 			keyLen,
 			hashVal,
-			cur_node->key,
-			cur_node->keyLen,
-			cur_node->hash)==0){
+			node->key,
+			node->keyLen,
+			node->hash)==0){
 			// key does exist, delete key
+			// if passed a pointer write out value
 			if(value){
-				*value = cur_node->value;
+				*value = node->value;
 			}
-			// relink list if applicable
-			if(prev_node==0){
-				// single entry or start of chain
-				// [ht]->[cur_node]->NULL or [ht]->[cur_node]->[NODE]
-				ht->table[hash]=cur_node->next;
-			} else {
-				// middle of chain or end entry
-				// [prev]->[cur_node]->[NODE] or [prev]->[cur_node]->NULL
-				prev_node->next=cur_node->next;
-			}
+			// over write memory with next address
+			*curSlotAddr = node->next;
 
-			free(cur_node);
+			HASHTABLE_FREE(node);
 			ht->count--;
 			return hashTable_OK;
 		}
-		if(cur_node->next==0){
-			// key does not exist, but shares hash value
-			return hashTable_nothingFound;
-		}
-		prev_node = cur_node;
-		cur_node=cur_node->next;
+		curSlotAddr = &node->next;
 	}
 }
 
@@ -363,6 +342,9 @@ hashTable_delete(
 	}
 	if(key==0){
 		return hashTable_errorNullParam2;
+	}
+	if(keyLen==0){
+		return hashTable_errorNullParam3;
 	}
 	if(ht->count==0){
 		return hashTable_errorTableIsEmpty;
@@ -424,7 +406,7 @@ static inline u32
 getNodeLen(u32 keyLen)
 {
 	// return nodeLen in bytes. Assume null termination, add 1
-	return (keyLen+1+sizeof(HtValue)+13+7)/8*8; // round up to 8 bytes
+	return (keyLen+1+sizeof(HtValue)+17+7)/8*8; // round up to 8 bytes
 }
 
 static s32
@@ -467,13 +449,13 @@ checkForSpace(HashTable *ht)
 		}
 	}
 	// free old tree
-	free(old_table);
+	HASHTABLE_FREE(old_table);
 	return hashTable_OK;
 }
 
 
 static inline hashTableNode *
-makeNode(HashTable *ht, u8 *key, u32 keyLen, HtValue value, u32 hashVal)
+makeNode(HashTable *ht, u8 *key, u32 keyLen, HtValue value, u64 hashVal)
 {
 	u32 i=0, nodeSize;
 	nodeSize = getNodeLen(keyLen);
@@ -509,16 +491,16 @@ stringCompare(u8 *str1, u8 *str2)
 	}
 }
 
-static inline s32 
+static inline s64 
 keyCmp(
 	u8 *key1,
 	u32 key1Len,
-	u32 key1Hash,
+	u64 key1Hash,
 	u8 *key2,
 	u32 key2Len,
-	u32 key2Hash)
+	u64 key2Hash)
 {
-	s32 res;
+	s64 res;
 	
 	res = (key1Len-key2Len)|(key1Hash-key2Hash);
 	if(res == 0){
@@ -607,11 +589,11 @@ hashTable_freeAll(HashTable **ht_p)
 			// there is atleast one thing here
 			prev_node = cur_node;
 			cur_node = cur_node->next;
-			free(prev_node);
+			HASHTABLE_FREE(prev_node);
 		}
 	}
-	free(table);
-	free(ht);
+	HASHTABLE_FREE(table);
+	HASHTABLE_FREE(ht);
 }
 
 #define SIGN_MASK   0x8000000000000000
@@ -695,8 +677,10 @@ hashTable_debugString(s32 mainAPIReturnValue)
 		return (u8*)"hashTable Error: Second parameter provided is NULL(0).\n";
 		case hashTable_errorNullParam3:
 		return (u8*)"hashTable Error: Third parameter provided is NULL(0).\n";
+		case hashTable_errorNullParam4:
+		return (u8*)"hashTable Error: Forth parameter provided is NULL(0).\n";
 		case hashTable_errorTableIsEmpty:
-		return (u8*)"hashTable Error: tree is empty because it is NULL(0).\n";
+		return (u8*)"hashTable Error: tree is empty because count = 0.\n";
 		case hashTable_errorMallocFailed:
 		return (u8*)"hashTable Error: "
 					"Malloc was called and returned NULL(0).\n";
