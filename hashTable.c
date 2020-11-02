@@ -387,10 +387,15 @@ static inline u64
 computeHash(u8 *key, u8 keyLen, u64 seed)
 {
 	u64 hash = seed;
+	u32 x=0;
 
-	for (u32 x=0; x<keyLen; x++)
+	while(1)
 	{
 		hash = (key[x]) + (hash * 0x00000100000001B3);
+		x++;
+		if(x>=keyLen) {
+			break;
+		}
 	}
 
 	return hash;
