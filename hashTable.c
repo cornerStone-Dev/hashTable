@@ -173,14 +173,8 @@ hashTable_insert_node(HashTable *ht, hashTableNode *n, u32 mask)
 	hashTableNode *cur_node;
 	hash = n->hash & mask;
 	cur_node = ht->table[hash];
-	if(cur_node){
-		// something exists, add to hash chain
-		n->next = cur_node;
-		ht->table[hash] = n;
-	} else {
-		// nothing exists, insert node
-		ht->table[hash] = n;
-	}
+	n->next = cur_node;
+	ht->table[hash] = n;
 }
 
 /*******************************************************************************
@@ -448,7 +442,6 @@ checkForSpace(HashTable *ht)
 		while(cur_node){
 			// there is atleast one thing here
 			next_node=cur_node->next;
-			cur_node->next = 0;
 			hashTable_insert_node(ht, cur_node, mask);
 			cur_node=next_node;
 		}
