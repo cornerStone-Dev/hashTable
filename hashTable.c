@@ -12,23 +12,61 @@ typedef int64_t  s64;
 #define ENTRY_SIZE (sizeof(hashTableNode*))
 
 /*******************************************************************************
- * Section Local Prototypes
+ * Section Internal Functions
  ******************************************************************************/
 
 static inline s32
 stringCompare(u8 *str1, u8 *str2) __attribute__((always_inline));
 
-static inline u32
-getNodeLen(u32 keyLen);
+static inline s32
+stringCompare(u8 *str1, u8 *str2)
+{
+	s32 c1, c2;
+	
+	while(1){
+		c1=*str1;
+		str1+=1;
+		c2=*str2;
+		str2+=1;
+		c1-=c2;
+		if( (c1!=0) || (c2==0) ){
+			return c1;
+		}
+	}
+}
 
 static inline u32
-getMask(u32 size);
+getNodeSize(u32 keyLen)
+{
+	// return nodeLen in bytes. Assume null termination, add 1
+	return (keyLen+1+sizeof(HtValue)+17+7)/8*8; // round up to 8 bytes
+}
 
-static s32
-checkForSpace(HashTable *ht);
+static inline u32
+getMask(u32 size)
+{
+	return size-1;
+}
 
-static inline hashTableNode * 
-makeNode(HashTable *ht, u8 *key, u32 keyLen, HtValue value, u64 hashVal);
+static inline hashTableNode *
+makeNode(HashTable *ht, u8 *key, u32 keyLen, HtValue value, u64 hash)
+{
+	u32 i=0, nodeSize;
+	nodeSize = getNodeSize(keyLen);
+	
+	hashTableNode *new = HASHTABLE_MALLOC(nodeSize);
+	
+	if(new){
+		ht->count++;
+		new->next = 0;
+		new->value = value;
+		new->hash = hash;
+		new->keyLen = keyLen;
+		do{new->key[i]=key[i];i++;}while(i<keyLen);
+		new->key[keyLen] = 0; // null terminate
+	}
+	return new;
+}
 
 static inline s64 
 keyCmp(
@@ -37,10 +75,132 @@ keyCmp(
 	u64 key1Hash,
 	u8 *key2,
 	u32 key2Len,
-	u64 key2Hash);
+	u64 key2Hash)
+{
+	s64 res;
+	
+	res = (key1Len-key2Len)|(key1Hash-key2Hash);
+	if(res == 0){
+		res = HT_CMP(key1,key2);
+	}
+	
+	return res;
+}
 
+// slightly modified fnv-1 algorithm, public domain
 static inline u64 
-computeHash(u8 *key, u8 keyLen, u64 seed);
+computeHash(u8 *key, u8 keyLen, u64 seed)
+{
+	u64 hash = seed;
+	u32 x=0;
+
+	while(1)
+	{
+		hash = (key[x]) + (hash * 0x00000100000001B3);
+		x++;
+		if(x>=keyLen) {
+			break;
+		}
+	}
+
+	return hash;
+}
+
+static void
+insert_node(
+	hashTableNode *n,
+	u32 mask,
+	hashTableNode **table)
+{
+	u64 hash;
+	hashTableNode *curNode;
+	hash = n->hash & mask;
+	curNode = table[hash];
+	n->next = curNode;
+	table[hash] = n;
+}
+
+static void
+insertInToNewTable(HashTable *ht, u32 size, u32 mask, hashTableNode **oldTable)
+{
+	hashTableNode *curNode, *nextNode;
+	hashTableNode **table = ht->table;
+	u32 x = 0;
+	do {
+		curNode = oldTable[x];
+		while(curNode){
+			// there is atleast one thing here
+			nextNode=curNode->next;
+			insert_node(curNode, mask, table);
+			curNode=nextNode;
+		}
+		x++;
+	} while (x < size);
+}
+
+static s32
+newTableAndPopulate(HashTable *ht, u32 oldSize, u64 newSize)
+{
+	hashTableNode **oldTable;
+	u32 mask;
+	// save off old table
+	oldTable = ht->table;
+	// make new table
+	ht->table = HASHTABLE_CALLOC(1, newSize*ENTRY_SIZE);
+	
+	if (ht->table==0)
+	{
+		// set table back to old one and report error
+		ht->table = oldTable;
+		return hashTable_errorCannotMakeNewTable;
+	}
+	
+	// put everything into new table
+	mask = getMask(newSize);
+	insertInToNewTable(ht, oldSize, mask, oldTable);
+	// free old tree
+	HASHTABLE_FREE(oldTable);
+	return hashTable_OK;
+}
+
+static s32
+checkSizeToGrow(HashTable *ht)
+{
+	u32 oldSize;
+	u64 newSize;
+	oldSize = ht->size;
+	// check if we need to re-size hashtable
+	if( (ht->count+1) <= (oldSize) )
+	{
+		return hashTable_OK;
+	}
+	newSize = oldSize*2;
+	ht->size = newSize;
+	
+	return newTableAndPopulate(ht, oldSize, newSize);
+}
+
+static s32
+checkSizeToShrink(HashTable *ht)
+{
+	u32 oldSize;
+	u64 newSize;
+	oldSize = ht->size;
+	if (oldSize <= 8)
+	{
+		return hashTable_OK;
+	}
+	// check if we need to re-size hashtable
+	if( (ht->count-1) >= (oldSize/4) )
+	{
+		return hashTable_OK;
+	}
+	
+	newSize = oldSize/2;
+	ht->size = newSize;
+	
+	return newTableAndPopulate(ht, oldSize, newSize);
+}
 
 /*******************************************************************************
  * Section Init
@@ -76,8 +236,47 @@ static s32
 HashTable_insert_internal(
 	HashTable *ht,
 	u8        *key,
-	u8        keyLen,
-	HtValue   value);
+	u8         keyLen,
+	HtValue    value)
+{
+	u64 hash, maskedHash;
+	hashTableNode *newNode, *curNode, **nodeAddr;
+	s32 returnCode;
+	
+	returnCode = checkSizeToGrow(ht);
+	
+	hash = HT_HASH(key, keyLen, ht->seed);
+	// search for existing key
+	maskedHash = hash & getMask(ht->size);
+	nodeAddr = &ht->table[maskedHash];
+
+	// begin search for slot
+	while (1) {
+		curNode = *nodeAddr;
+		if (curNode == 0)
+		{
+			// nothing exists, make node and insert
+			newNode = makeNode(ht, key, keyLen, value, hash);
+			if (newNode==0) {
+				return hashTable_errorMallocFailed;
+			}
+			*nodeAddr = newNode;
+			return returnCode;
+		}
+		if (keyCmp(
+				key,
+				keyLen,
+				hash,
+				curNode->key,
+				curNode->keyLen,
+				curNode->hash)==0 ) {
+			// key does exist, update value
+			curNode->value = value;
+			return hashTable_updatedValOfExistingKey;
+		}
+		nodeAddr = &curNode->next;
+	}
+}
 
 HASHTABLE_STATIC_BUILD
 s32
@@ -99,57 +298,6 @@ hashTable_insert(
 	return HashTable_insert_internal(ht, key, keyLen, value);
 }
 
-static s32
-HashTable_insert_internal(
-	HashTable *ht,
-	u8        *key,
-	u8         keyLen,
-	HtValue    value)
-{
-	u64 hash;
-	u64 hashVal;
-	s32 returnCode;
-	hashTableNode *newNode, *curNode, **memAddr;
-	
-	returnCode = checkForSpace(ht);
-	if(returnCode){return returnCode;}
-	
-	hash = HT_HASH(key, keyLen, ht->seed);
-	// search for existing key
-	hashVal = hash;
-	hash = hash & getMask(ht->size);
-	curNode = ht->table[hash];
-	memAddr = &ht->table[hash];
-
-	// begin search for slot
-	while (1){
-		if (curNode == 0)
-		{
-			// nothing exists, make node and insert
-			newNode = makeNode(ht, key, keyLen, value, hashVal);
-			if(newNode==0){
-				return hashTable_errorMallocFailed;
-			}
-			*memAddr = newNode;
-			return hashTable_OK;
-		}
-		if(keyCmp(
-			key,
-			keyLen,
-			hashVal,
-			curNode->key,
-			curNode->keyLen,
-			curNode->hash)==0){
-			// key does exist, update value
-			curNode->value = value;
-			return hashTable_updatedValOfExistingKey;
-		}
-		memAddr = &curNode->next;
-		curNode =  curNode->next;
-	}
-}
-
-
 HASHTABLE_STATIC_BUILD
 s32
 hashTable_insertIntKey(
@@ -157,24 +305,16 @@ hashTable_insertIntKey(
 	s64       key,
 	HtValue   value)
 {
+	if(ht==0){
+		return hashTable_errorNullParam1;
+	}
 	u8 keyBuffer[16];
 	u8 keyLen = hashTable_s64toString(key, keyBuffer);
-	return hashTable_insert(
+	return HashTable_insert_internal(
 				ht,
 				keyBuffer,
 				keyLen,
 				value);
-}
-
-static void
-hashTable_insert_node(HashTable *ht, hashTableNode *n, u32 mask)
-{
-	u64 hash;
-	hashTableNode *cur_node;
-	hash = n->hash & mask;
-	cur_node = ht->table[hash];
-	n->next = cur_node;
-	ht->table[hash] = n;
 }
 
 /*******************************************************************************
@@ -185,14 +325,43 @@ static hashTableNode *
 hashTable_find_internal(
 	HashTable *ht,
 	u8        *key,
-	u8        keyLen);
+	u8        keyLen)
+{
+	u64 hash, maskedHash;
+	hashTableNode *curNode;
+	
+	hash = HT_HASH(key, keyLen, ht->seed);
+	// search for existing key
+	maskedHash = hash & getMask(ht->size);
+	curNode = ht->table[maskedHash];
+	
+	// something exists,  might be key
+	while (1) {
+		if (curNode == 0)
+		{
+			// nothing exists
+			return 0;
+		}
+		if(keyCmp(
+			key,
+			keyLen,
+			hash,
+			curNode->key,
+			curNode->keyLen,
+			curNode->hash)==0){
+			// key does exist, return key
+			return curNode;
+		}
+		curNode=curNode->next;
+	}
+}
 
 HASHTABLE_STATIC_BUILD
 s32
 hashTable_find(
-	HashTable *ht,
-	u8        *key,
-	u8        keyLen,
+	HashTable      *ht,
+	u8             *key,
+	u8              keyLen,
 	hashTableNode **result)
 {
 	hashTableNode *internalResult;
@@ -208,9 +377,6 @@ hashTable_find(
 	if(result==0){
 		return hashTable_errorNullParam4;
 	}
-	if(ht->count==0){
-		return hashTable_errorTableIsEmpty;
-	}
 	internalResult = hashTable_find_internal(ht, key, keyLen);
 	
 	if(internalResult==0){
@@ -221,42 +387,7 @@ hashTable_find(
 	return hashTable_OK;
 }
 
-static hashTableNode *
-hashTable_find_internal(
-	HashTable *ht,
-	u8        *key,
-	u8        keyLen)
-{
-	u64 hash;
-	u64 hashVal;
-	hashTableNode *curNode;
-	
-	hash = HT_HASH(key, keyLen, ht->seed);
-	// search for existing key
-	hashVal = hash;
-	hash = hash & getMask(ht->size);
-	curNode = ht->table[hash];
-	
-	// something exists,  might be key
-	while (1) {
-		if (curNode == 0)
-		{
-			// nothing exists
-			return 0;
-		}
-		if(keyCmp(
-			key,
-			keyLen,
-			hashVal,
-			curNode->key,
-			curNode->keyLen,
-			curNode->hash)==0){
-			// key does exist, return key
-			return curNode;
-		}
-		curNode=curNode->next;
-	}
-}
+
 
 HASHTABLE_STATIC_BUILD
 s32
@@ -281,15 +412,16 @@ hashTable_delete_internal(
 	u8        keyLen,
 	HtValue   *value)
 {
-	u64 hash;
-	u64 hashVal;
+	u64 hash, maskedHash;
 	hashTableNode **curSlotAddr, *node;
+	s32 returnCode;
+	
+	returnCode = checkSizeToShrink(ht);
 	
 	hash = HT_HASH(key, keyLen, ht->seed);
 	// search for existing key
-	hashVal = hash;
-	hash = hash & getMask(ht->size);
-	curSlotAddr = &ht->table[hash];
+	maskedHash = hash & getMask(ht->size);
+	curSlotAddr = &ht->table[maskedHash];
 	
 	// something exists,  might be key
 	while (1){
@@ -299,11 +431,10 @@ hashTable_delete_internal(
 			// nothing exists
 			return hashTable_nothingFound;
 		}
-		
 		if(keyCmp(
 			key,
 			keyLen,
-			hashVal,
+			hash,
 			node->key,
 			node->keyLen,
 			node->hash)==0){
@@ -317,7 +448,7 @@ hashTable_delete_internal(
 
 			HASHTABLE_FREE(node);
 			ht->count--;
-			return hashTable_OK;
+			return returnCode;
 		}
 		curSlotAddr = &node->next;
 	}
@@ -340,9 +471,6 @@ hashTable_delete(
 	if(keyLen==0){
 		return hashTable_errorNullParam3;
 	}
-	if(ht->count==0){
-		return hashTable_errorTableIsEmpty;
-	}
 	return hashTable_delete_internal(ht, key, keyLen, value);
 }
 
@@ -353,9 +481,12 @@ hashTable_deleteIntKey(
 	s64       key,
 	HtValue   *value)
 {
+	if(ht==0){
+		return hashTable_errorNullParam1;
+	}
 	u8 keyBuffer[16];
 	u8 keyLen = hashTable_s64toString(key, keyBuffer);
-	return hashTable_delete(ht, keyBuffer, keyLen, value);
+	return hashTable_delete_internal(ht, keyBuffer, keyLen, value);
 }
 
 /*******************************************************************************
@@ -376,136 +507,11 @@ hashTable_setSeed(HashTable *ht, u64 seed)
 	ht->seed = seed;
 }
 
-// slightly modified fnv-1 algorithm, public domain
-static inline u64 
-computeHash(u8 *key, u8 keyLen, u64 seed)
+HASHTABLE_STATIC_BUILD
+u32
+hashTable_getCount(HashTable *ht)
 {
-	u64 hash = seed;
-	u32 x=0;
-
-	while(1)
-	{
-		hash = (key[x]) + (hash * 0x00000100000001B3);
-		x++;
-		if(x>=keyLen) {
-			break;
-		}
-	}
-
-	return hash;
-}
-
-static inline u32
-getMask(u32 size)
-{
-	return size-1;
-}
-
-static inline u32
-getNodeLen(u32 keyLen)
-{
-	// return nodeLen in bytes. Assume null termination, add 1
-	return (keyLen+1+sizeof(HtValue)+17+7)/8*8; // round up to 8 bytes
-}
-
-static s32
-checkForSpace(HashTable *ht)
-{
-	hashTableNode **old_table;
-	u32 size, htSize, mask;
-	// check if we need to re-size hashtable
-	if( (ht->count+1) <= (ht->size) )
-	{
-		return hashTable_OK;
-	}
-	ht->size*=2;
-	htSize = ht->size;
-	// save off old table
-	old_table = ht->table;
-	// make new table
-	ht->table = HASHTABLE_CALLOC(1, htSize*ENTRY_SIZE);
-	
-	if (ht->table==0)
-	{
-		// set table back to old one and report error
-		ht->table = old_table;
-		return hashTable_errorMallocFailed;
-	}
-	
-	// re-hash(if needed) everything and insert
-	hashTableNode *cur_node, *next_node;
-	size = (htSize/2);
-	mask = getMask(htSize); 
-	for(u32 x = 0; x < size; x++)
-	{
-		cur_node = old_table[x];
-		while(cur_node){
-			// there is atleast one thing here
-			next_node=cur_node->next;
-			hashTable_insert_node(ht, cur_node, mask);
-			cur_node=next_node;
-		}
-	}
-	// free old tree
-	HASHTABLE_FREE(old_table);
-	return hashTable_OK;
-}
-
-
-static inline hashTableNode *
-makeNode(HashTable *ht, u8 *key, u32 keyLen, HtValue value, u64 hashVal)
-{
-	u32 i=0, nodeSize;
-	nodeSize = getNodeLen(keyLen);
-	
-	hashTableNode *new = HASHTABLE_MALLOC(nodeSize);
-	
-	if(new){
-		ht->count++;
-		new->next = 0;
-		new->value = value;
-		new->hash = hashVal;
-		new->keyLen = keyLen;
-		do{new->key[i]=key[i];i++;}while(i<keyLen);
-		new->key[keyLen] = 0; // null terminate
-	}
-	return new;
-}
-
-static inline s32
-stringCompare(u8 *str1, u8 *str2)
-{
-	s32 c1, c2;
-	
-	while(1){
-		c1=*str1;
-		str1+=1;
-		c2=*str2;
-		str2+=1;
-		c1-=c2;
-		if( (c1!=0) || (c2==0) ){
-			return c1;
-		}
-	}
-}
-
-static inline s64 
-keyCmp(
-	u8 *key1,
-	u32 key1Len,
-	u64 key1Hash,
-	u8 *key2,
-	u32 key2Len,
-	u64 key2Hash)
-{
-	s64 res;
-	
-	res = (key1Len-key2Len)|(key1Hash-key2Hash);
-	if(res == 0){
-		res = HT_CMP(key1,key2);
-	}
-	
-	return res;
+	return ht->count;
 }
 
 /*******************************************************************************
@@ -520,21 +526,21 @@ hashTable_maxChain(HashTable *ht)
 		return 0;
 	}
 	hashTableNode **table = ht->table;
-	u32 chain_count, max=0;
-	hashTableNode *cur_node;
+	u32 chainCount, max=0;
+	hashTableNode *curNode;
 	u32 size;
 	size = ht->size;
 	for(u32 x = 0; x < size; x++)
 	{
-		cur_node = table[x];
-		chain_count = 0;
-		while(cur_node){
+		curNode = table[x];
+		chainCount = 0;
+		while(curNode){
 			// there is atleast one thing here
-			chain_count++;
-			cur_node=cur_node->next;
+			chainCount++;
+			curNode=curNode->next;
 		}
-		if(chain_count>max){
-			max = chain_count;
+		if(chainCount>max){
+			max = chainCount;
 		}
 	}
 
@@ -549,17 +555,17 @@ hashTable_countEachNode(HashTable *ht)
 		return 0;
 	}
 	hashTableNode **table = ht->table;
-	hashTableNode *cur_node;
+	hashTableNode *curNode;
 	u32 count=0;
 	u32 size;
 	size = ht->size;
 	for(u32 x = 0; x < size; x++)
 	{
-		cur_node = table[x];
-		while(cur_node){
+		curNode = table[x];
+		while(curNode){
 			// there is atleast one thing here
 			count++;
-			cur_node = cur_node->next;
+			curNode = curNode->next;
 		}
 	}
 	return count;
@@ -571,7 +577,7 @@ hashTable_freeAll(HashTable **ht_p)
 {
 	HashTable *ht;
 	hashTableNode **table;
-	hashTableNode *cur_node, *prev_node;
+	hashTableNode *curNode, *prevNode;
 	u32 size;
 	if (ht_p==0) {
 		return;
@@ -582,12 +588,12 @@ hashTable_freeAll(HashTable **ht_p)
 	size = ht->size;
 	for(u32 x = 0; x < size; x++)
 	{
-		cur_node = table[x];
-		while(cur_node){
+		curNode = table[x];
+		while(curNode){
 			// there is atleast one thing here
-			prev_node = cur_node;
-			cur_node = cur_node->next;
-			HASHTABLE_FREE(prev_node);
+			prevNode = curNode;
+			curNode = curNode->next;
+			HASHTABLE_FREE(prevNode);
 		}
 	}
 	HASHTABLE_FREE(table);
@@ -638,22 +644,25 @@ hashTable_s64toString(s64 signedInput, u8 *output)
 }
 
 HASHTABLE_STATIC_BUILD
-s64 
+s64
 hashTable_stringTos64(u8 *string)
 {
 	u64 val = 0;
-	u64 isNegative = (((*string)&0x80)==0);
+	u32 stringVal;
+	u64 isNegative = ((*string)&0x80);
+    isNegative<<=56;
 	
 	// skip header
 	++string;
 	
 	while ( (*string >= 1) && (*string <= 128) ) {
-		val = (val * 128) + ((*string) - 1);
+		stringVal = (*string) - 1;
+		val = (val * 128) + stringVal;
 		++string;
 	}
 	
 	// add back in sign bit
-	val = val | (isNegative<<63);
+	val = val | isNegative;
 	
 	return (s64)val;
 }
@@ -667,8 +676,7 @@ HASHTABLE_STATIC_BUILD
 u8 *
 hashTable_debugString(s32 mainAPIReturnValue)
 {
-	s32 x = mainAPIReturnValue;
-	switch(x){
+	switch(mainAPIReturnValue){
 		case hashTable_errorNullParam1:
 		return (u8*)"hashTable Error: First parameter provided is NULL(0).\n";
 		case hashTable_errorNullParam2:
@@ -677,11 +685,13 @@ hashTable_debugString(s32 mainAPIReturnValue)
 		return (u8*)"hashTable Error: Third parameter provided is NULL(0).\n";
 		case hashTable_errorNullParam4:
 		return (u8*)"hashTable Error: Forth parameter provided is NULL(0).\n";
-		case hashTable_errorTableIsEmpty:
-		return (u8*)"hashTable Error: tree is empty because count = 0.\n";
 		case hashTable_errorMallocFailed:
 		return (u8*)"hashTable Error: "
 					"Malloc was called and returned NULL(0).\n";
+		case hashTable_errorCannotMakeNewTable:
+		return (u8*)"hashTable Error: "
+					"Calloc was called and returned NULL(0). Cannot make "
+					"new table, using old table (capacity above 1.0).\n";
 		case hashTable_OK:
 		return (u8*)"hashTable OK: Everything worked as intended.\n";
 		case hashTable_nothingFound:

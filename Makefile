@@ -2,7 +2,7 @@
 all: bin hashTable.o
 
 hashTable.o: hashTable.c hashTable.h
-	gcc -Os -march=native hashTable.c -c -o hashTable.o -Wall -Wextra
+	gcc -O2 -march=native hashTable.c -c -o hashTable.o -Wall -Wextra
 	size hashTable.o
 
 bin/hashTableTest: hashTableTest.c hashTable.o

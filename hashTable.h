@@ -44,9 +44,9 @@ typedef uint64_t HtValue;
  * Section Types
 *******************************************************************************/
 
-typedef struct HtNode_s hashTableNode;
+typedef struct hashTableNode hashTableNode;
 
-typedef struct HtNode_s {
+typedef struct hashTableNode {
 	hashTableNode *next;
 	HtValue       value;
 	uint64_t      hash;
@@ -54,7 +54,7 @@ typedef struct HtNode_s {
 	uint8_t       key[7];
 } hashTableNode;
 
-typedef struct {
+typedef struct HashTable {
 	hashTableNode **table;
 	uint64_t      seed;
 	uint32_t      count;
@@ -68,8 +68,8 @@ enum {
 	hashTable_errorNullParam2         = -2,
 	hashTable_errorNullParam3         = -3,
 	hashTable_errorNullParam4         = -4,
-	hashTable_errorTableIsEmpty       = -5,
-	hashTable_errorMallocFailed       = -6,
+	hashTable_errorMallocFailed       = -5,
+	hashTable_errorCannotMakeNewTable = -6,
 	// worked as expected
 	hashTable_OK                      =  0,
 	// not an error, but did not work as expected
@@ -151,6 +151,10 @@ hashTable_getSeed(HashTable *ht);
 HASHTABLE_STATIC_BUILD
 void
 hashTable_setSeed(HashTable *ht, uint64_t seed);
+
+HASHTABLE_STATIC_BUILD
+uint32_t
+hashTable_getCount(HashTable *ht);
 
 HASHTABLE_STATIC_BUILD
 uint32_t
