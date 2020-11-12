@@ -654,7 +654,7 @@ hashTable_stringTos64(u8 *string)
 	u64 val = 0;
 	u32 stringVal;
 	u64 isNegative = ((*string)&0x80);
-    isNegative<<=56;
+	isNegative<<=56;
 	
 	// skip header
 	++string;
