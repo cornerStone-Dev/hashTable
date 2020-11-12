@@ -52,9 +52,10 @@ static inline hashTableNode *
 makeNode(HashTable *ht, u8 *key, u32 keyLen, HtValue value, u64 hash)
 {
 	u32 i=0, nodeSize;
+	hashTableNode *new;
 	nodeSize = getNodeSize(keyLen);
 	
-	hashTableNode *new = HASHTABLE_MALLOC(nodeSize);
+	new = HASHTABLE_MALLOC(nodeSize);
 	
 	if(new){
 		ht->count++;
@@ -174,6 +175,7 @@ checkSizeToGrow(HashTable *ht)
 	{
 		return hashTable_OK;
 	}
+	// resize to double, new table will be half full
 	newSize = oldSize*2;
 	ht->size = newSize;
 	
@@ -186,6 +188,7 @@ checkSizeToShrink(HashTable *ht)
 	u32 oldSize;
 	u64 newSize;
 	oldSize = ht->size;
+	// check for minimum hash table size
 	if (oldSize <= 8)
 	{
 		return hashTable_OK;
@@ -195,7 +198,7 @@ checkSizeToShrink(HashTable *ht)
 	{
 		return hashTable_OK;
 	}
-	
+	// resize to half, new table will be half full
 	newSize = oldSize/2;
 	ht->size = newSize;
 	
@@ -210,10 +213,11 @@ HASHTABLE_STATIC_BUILD
 s32
 hashTable_init(HashTable **ht_p)
 {
+	HashTable *ht;
 	if(ht_p==0){
 		return hashTable_errorNullParam1;
 	}
-	HashTable *ht = HASHTABLE_MALLOC(sizeof(HashTable));
+	ht = HASHTABLE_MALLOC(sizeof(HashTable));
 	if(ht==0){
 		return hashTable_errorMallocFailed;
 	}
@@ -305,16 +309,13 @@ hashTable_insertIntKey(
 	s64       key,
 	HtValue   value)
 {
+	u8 keyBuffer[16];
+	u8 keyLen;
 	if(ht==0){
 		return hashTable_errorNullParam1;
 	}
-	u8 keyBuffer[16];
-	u8 keyLen = hashTable_s64toString(key, keyBuffer);
-	return HashTable_insert_internal(
-				ht,
-				keyBuffer,
-				keyLen,
-				value);
+	keyLen = hashTable_s64toString(key, keyBuffer);
+	return HashTable_insert_internal(ht, keyBuffer, keyLen, value);
 }
 
 /*******************************************************************************
@@ -377,8 +378,8 @@ hashTable_find(
 	if(result==0){
 		return hashTable_errorNullParam4;
 	}
-	internalResult = hashTable_find_internal(ht, key, keyLen);
 	
+	internalResult = hashTable_find_internal(ht, key, keyLen);
 	if(internalResult==0){
 		return hashTable_nothingFound;
 	}
@@ -481,11 +482,12 @@ hashTable_deleteIntKey(
 	s64       key,
 	HtValue   *value)
 {
+	u8 keyBuffer[16];
+	u8 keyLen;
 	if(ht==0){
 		return hashTable_errorNullParam1;
 	}
-	u8 keyBuffer[16];
-	u8 keyLen = hashTable_s64toString(key, keyBuffer);
+	keyLen = hashTable_s64toString(key, keyBuffer);
 	return hashTable_delete_internal(ht, keyBuffer, keyLen, value);
 }
 
@@ -522,15 +524,16 @@ HASHTABLE_STATIC_BUILD
 u32
 hashTable_maxChain(HashTable *ht)
 {
+	hashTableNode **table;
+	u32 chainCount, size, max, x;
+	hashTableNode *curNode;
 	if(ht==0){
 		return 0;
 	}
-	hashTableNode **table = ht->table;
-	u32 chainCount, max=0;
-	hashTableNode *curNode;
-	u32 size;
+	max = 0;
+	table = ht->table;
 	size = ht->size;
-	for(u32 x = 0; x < size; x++)
+	for(x = 0; x < size; x++)
 	{
 		curNode = table[x];
 		chainCount = 0;
@@ -551,15 +554,16 @@ HASHTABLE_STATIC_BUILD
 u32
 hashTable_countEachNode(HashTable *ht)
 {
+	hashTableNode **table;
+	hashTableNode *curNode;
+	u32 count, size, x;
 	if(ht==0){
 		return 0;
 	}
-	hashTableNode **table = ht->table;
-	hashTableNode *curNode;
-	u32 count=0;
-	u32 size;
+	count = 0;
+	table = ht->table;
 	size = ht->size;
-	for(u32 x = 0; x < size; x++)
+	for(x = 0; x < size; x++)
 	{
 		curNode = table[x];
 		while(curNode){
@@ -578,7 +582,7 @@ hashTable_freeAll(HashTable **ht_p)
 	HashTable *ht;
 	hashTableNode **table;
 	hashTableNode *curNode, *prevNode;
-	u32 size;
+	u32 size, x;
 	if (ht_p==0) {
 		return;
 	}
@@ -586,7 +590,7 @@ hashTable_freeAll(HashTable **ht_p)
 	*ht_p = 0;
 	table = ht->table;
 	size = ht->size;
-	for(u32 x = 0; x < size; x++)
+	for(x = 0; x < size; x++)
 	{
 		curNode = table[x];
 		while(curNode){

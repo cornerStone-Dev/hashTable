@@ -152,26 +152,33 @@ HASHTABLE_STATIC_BUILD
 void
 hashTable_setSeed(HashTable *ht, uint64_t seed);
 
+// gets the count stored within the hash table
 HASHTABLE_STATIC_BUILD
 uint32_t
 hashTable_getCount(HashTable *ht);
 
+// walks hash table to manualy count nodes
 HASHTABLE_STATIC_BUILD
 uint32_t
 hashTable_countEachNode(HashTable *ht);
 
+// return max chain of nodes. If you get > 8 there is room for improvement
 HASHTABLE_STATIC_BUILD
 uint32_t
 hashTable_maxChain(HashTable *ht);
 
+// frees all nodes, frees the hash table, frees the ht and sets *ht_p=0
 HASHTABLE_STATIC_BUILD
 void
 hashTable_freeAll(HashTable **ht_p);
 
+// this is offered externally, used internally to convert integers to hash
+// friendly string form with no 0s
 HASHTABLE_STATIC_BUILD
 uint32_t
 hashTable_s64toString(int64_t input, uint8_t *output);
 
+// go backwards from above
 HASHTABLE_STATIC_BUILD
 int64_t 
 hashTable_stringTos64(uint8_t *string);
@@ -184,7 +191,7 @@ hashTable_stringTos64(uint8_t *string);
  * Parameter explanation:
  * ht - pointer to ht.
  * 
- * function - function name that takes a pointer to a tree as a first parameter
+ * function - function name that takes a pointer to a node as a first parameter
  * and "parameter" of what ever type as second parameter.
  * 
  * function return value is zero to signal OK to continue or non-zero to exit
@@ -200,17 +207,17 @@ do{ \
 	__label__ EXIT; \
 	if(ht){ \
 		hashTableNode **table = ht->table; \
-		hashTableNode *cur_node; \
-		u32 size; \
+		hashTableNode *node; \
+		u32 size, x; \
 		size = ht->size; \
-		for(u32 x = 0; x < size; x++) \
+		for(x = 0; x < size; x++) \
 		{ \
-			cur_node = table[x]; \
-			while(cur_node){ \
-				if(function(cur_node, parameter)){ \
+			node = table[x]; \
+			while(node){ \
+				if(function(node, parameter)){ \
 					goto EXIT; \
 				} \
-				cur_node = cur_node->next; \
+				node = node->next; \
 			} \
 		} \
 	} \
