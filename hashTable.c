@@ -16,12 +16,13 @@ typedef int64_t  s64;
  ******************************************************************************/
 
 static inline s32
-stringCompare(u8 *str1, u8 *str2) __attribute__((always_inline));
+stringCompare(u8 *str1, u8 *str2, u32 len) __attribute__((always_inline));
 
 static inline s32
-stringCompare(u8 *str1, u8 *str2)
+stringCompare(u8 *str1, u8 *str2, u32 len)
 {
 	s32 c1, c2;
+	u32 x=0;
 	
 	while(1){
 		c1=*str1;
@@ -29,7 +30,7 @@ stringCompare(u8 *str1, u8 *str2)
 		c2=*str2;
 		str2+=1;
 		c1-=c2;
-		if( (c1!=0) || (c2==0) ){
+		if( (c1!=0) || (++x>=len) ){
 			return c1;
 		}
 	}
@@ -82,7 +83,7 @@ keyCmp(
 	
 	res = (key1Len-key2Len)|(key1Hash-key2Hash);
 	if(res == 0){
-		res = HT_CMP(key1,key2);
+		res = HT_CMP(key1,key2,key1Len);
 	}
 	
 	return res;

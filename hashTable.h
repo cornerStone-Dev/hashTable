@@ -21,9 +21,9 @@ typedef uint64_t HtValue;
 #endif
 
 // compare needs to be of type
-// int32_t yourCompareFunction(uint8_t *s1, uint8_t *s1)
+// int32_t yourCompareFunction(uint8_t *s1, uint8_t *s1, uint32_t length)
 #ifndef HASHTABLE_CUSTOM_CMP
-#define HT_CMP(x,y)  (stringCompare((x),(y)))
+#define HT_CMP(x,y,z)  (stringCompare((x),(y),(z)))
 #endif
 
 // hash needs to be of type
@@ -90,7 +90,7 @@ HASHTABLE_STATIC_BUILD
 int32_t
 hashTable_insert(
 	HashTable *ht,    // pointer memory holding address of tree
-	uint8_t   *key,   // pointer to c-string key(null required)
+	uint8_t   *key,   // pointer to string key
 	uint8_t   keyLen, // length of key in bytes(not including null)
 	HtValue   value); // value to be stored
 
@@ -106,7 +106,7 @@ HASHTABLE_STATIC_BUILD
 int32_t
 hashTable_find(
 	HashTable     *ht,       // pointer to hash table
-	uint8_t       *key,      // pointer to c-string key(null required)
+	uint8_t       *key,      // pointer to string key
 	uint8_t       keyLen,    // length of key in bytes(not including null)
 	hashTableNode **result); // address for search result to be written
 
@@ -122,7 +122,7 @@ HASHTABLE_STATIC_BUILD
 int32_t
 hashTable_delete(
 	HashTable *ht,     // pointer memory holding address of tree
-	uint8_t   *key,    // pointer to c-string key(null required)
+	uint8_t   *key,    // pointer to string key
 	uint8_t   keyLen,  // length of key in bytes(not including null)
 	HtValue   *value); // OPTIONAL: pointer to memory for value to written
 
